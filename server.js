@@ -1,85 +1,47 @@
-//Loading dependencies & initializing express
-let os = require('os');
-var express = require('express');
-var app = express();
-var http = require('http');
-//For signalling in WebRTC
-var socketIO = require('socket.io');
+// server.js
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const path = require('path');
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 
-let connectedUsers = [];
+const port = process.env.PORT || 3000;
 
-app.use(express.static('public'))
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-app.get("/", function(req, res){
-	res.render("index.ejs");
+app.get('/', (req, res) => {
+	res.render('index');
 });
 
-var server = http.createServer(app);
+io.on('connection', socket => {
+	console.log('A user connected: ', socket.id);
 
-server.listen(process.env.PORT || 3000);
-
-var io = socketIO(server);
-
-io.sockets.on('connection', function(socket) {
-
-	connectedUsers.push(socket.id);
-	socket.emit('init', socket.id);
-	// Convenience function to log server messages on the client.
-	// Arguments is an array like object which contains all the arguments of log(). 
-	// To push all the arguments of log() in array, we have to use apply().
-	function log() {
-	  var array = ['Message from server:'];
-	  array.push.apply(array, arguments);
-	  socket.emit('log', array);
-	}
-  
-    
-    //Defining Socket Connections
-    socket.on('message', function(message, room) {
-	  log('Client said: ', message);
-	  // for a real app, would be room-only (not broadcast)
-	  socket.in(room).emit('message', message, room);
-	});
-  
-	socket.on('create or join', function(room) {
-	  log('Received request to create or join room ' + room);
-  
-      var clientsInRoom = io.sockets.adapter.rooms.get(room);
-
-      var numClients = clientsInRoom ? clientsInRoom.size : 0;
-      log("Room " + room + " now has " + numClients + " client(s)")
-  
-	  if (numClients === 0) {
+	socket.on('join-room', room => {
 		socket.join(room);
-		log('Client ID ' + socket.id + ' created room ' + room);
-		socket.emit('created', room, socket.id);
-  
-	  } else if (numClients >= 1) {
-		log('Client ID ' + socket.id + ' joined room ' + room);
-		io.sockets.in(room).emit('join', room);
-		socket.join(room);
-		socket.emit('joined', room, socket.id);
-		io.sockets.in(room).emit('ready');
-	  }
-	});
-  
-	socket.on('ipaddr', function() {
-	  var ifaces = os.networkInterfaces();
-	  for (var dev in ifaces) {
-		ifaces[dev].forEach(function(details) {
-		  if (details.family === 'IPv4' && details.address !== '127.0.0.1') {
-			socket.emit('ipaddr', details.address);
-		  }
+		socket.to(room).emit('user-connected', socket.id);
+
+		socket.on('offer', (id, message) => {
+			socket.to(id).emit('offer', socket.id, message);
 		});
-	  }
+
+		socket.on('answer', (id, message) => {
+			socket.to(id).emit('answer', socket.id, message);
+		});
+
+		socket.on('candidate', (id, message) => {
+			socket.to(id).emit('candidate', socket.id, message);
+		});
+
+		socket.on('disconnect', () => {
+			socket.to(room).emit('user-disconnected', socket.id);
+		});
 	});
-  
-	socket.on('bye', function(){
-	  console.log('received bye');
-		connectedUsers = connectedUsers.filter(user => user !== socket.id)
-		console.log(
-			socket.id + ' / ' + msToTime() + ' : 유저 배열에서 끊어진 소켓 아이디를 제거'
-		);
-	});
-  
-  });
+});
+
+server.listen(port, () => {
+	console.log(`Server is running on port ${port}`);
+});

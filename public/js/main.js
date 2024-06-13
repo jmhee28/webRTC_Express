@@ -1,323 +1,163 @@
-//Defining some global utility variables
-var isChannelReady = false;
-var isInitiator = false;
-var isStarted = false;
-var pc;
-var turnReady;
-var datachannel;
-
-//Initialize turn/stun server here
-//turnconfig will be defined in public/js/config.js
-var pcConfig = turnConfig;
-
-
-// Prompting for room name:
-var room = prompt('Enter room name:');
-
-//Initializing socket.io
-var socket = io.connect();
-
-//Ask server to add in the room if room name is provided by the user
-if (room !== '') {
-    // socket.emit('create or join', room);
-    // console.log('Attempted to create or  join room', room);
-}
-const infos = document.getElementById('infos');
-const userIdElement = document.getElementById('userId');
-const informationElement = document.getElementById('information');
-
-let userId;
-//Defining socket events
-socket.on('init', function (data) {
-    userId = data.id;
-    userIdElement.innerText = `ID: ${data}`;
-    addDynamicDiv(informationElement,`${msToTime()} 소켓연결`)
-})
-//Event - Client has created the room i.e. is the first member of the room
-socket.on('created', function (room) {
-    console.log('Created room ' + room);
-    isInitiator = true;
-});
-
-//Event - Room is full
-socket.on('full', function (room) {
-    console.log('Room ' + room + ' is full');
-});
-
-//Event - Another client tries to join room
-socket.on('join', function (room) {
-    console.log('Another peer made a request to join room ' + room);
-    console.log('This peer is the initiator of room ' + room + '!');
-    isChannelReady = true;
-});
-
-//Event - Client has joined the room
-socket.on('joined', function (room) {
-    console.log('joined: ' + room);
-    isChannelReady = true;
-});
-
-//Event - server asks to log a message
-socket.on('log', function (array) {
-    console.log.apply(console, array);
-});
-
-
-//Event - for sending meta for establishing a direct connection using WebRTC
-//The Driver code
-socket.on('message', function (message, room) {
-    console.log('Client received message:', message, room);
-    if (message === 'gotuser') {
-        maybeStart();
-    } else if (message.type === 'offer') {
-        if (!isInitiator && !isStarted) {
-            maybeStart();
-        }
-        pc.setRemoteDescription(new RTCSessionDescription(message));
-        doAnswer();
-    } else if (message.type === 'answer' && isStarted) {
-        pc.setRemoteDescription(new RTCSessionDescription(message));
-    } else if (message.type === 'candidate' && isStarted) {
-        var candidate = new RTCIceCandidate({
-            sdpMLineIndex: message.label,
-            candidate: message.candidate
-        });
-        pc.addIceCandidate(candidate);
-    } else if (message === 'bye' && isStarted) {
-        handleRemoteHangup();
-    }
-});
-
-
-
-//Function to send message in a room
-function sendMessage(message, room) {
-    console.log('Client sending message: ', message, room);
-    socket.emit('message', message, room);
-}
-
-
-
-//If initiator, create the peer connection
-function maybeStart() {
-    console.log('>>>>>>> maybeStart() ', isStarted, isChannelReady);
-    if (!isStarted && isChannelReady) {
-        console.log('>>>>>> creating peer connection');
-        createPeerConnection();
-        isStarted = true;
-        console.log('isInitiator', isInitiator);
-        if (isInitiator) {
-            doCall();
-        }
-    }
-}
-
-//Sending bye if user closes the window
-window.onbeforeunload = function () {
-    sendMessage('bye', room);
+const turnConfig = {
+    iceServers: [
+        {
+            urls: 'stun:stun1.l.google.com:19302',
+        },
+        {
+            urls: 'stun:stun3.l.google.com:19302',
+        },
+        {
+            urls: 'stun:stun4.l.google.com:19302',
+        },
+    ],
 };
-var datachannel
-//Creating peer connection
-function createPeerConnection() {
-    try {
-        pc = new RTCPeerConnection(pcConfig);
-        pc.onicecandidate = handleIceCandidate;
-        console.log('Created RTCPeerConnnection');
+const socket = io();
+const peers = {};
+const fileInput = document.getElementById('fileInput');
+const roomForm = document.getElementById('roomForm');
+const roomInput = document.getElementById('roomInput');
+const messagesDiv = document.getElementById('messages');
+const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 
-        // Offerer side
-        datachannel = pc.createDataChannel("filetransfer");
-        datachannel.onopen =  (event) => {
-            datachannel.send("offerer sent:THIS")
-        };
-
-        datachannel.onmessage =  (event)=> {
-            console.log("The offerrer received a message"+event.data);
-        }
-        datachannel.onerror = (error) => {
-            //console.log("Data Channel Error:", error);
-        };
-
-        datachannel.onclose = () => {
-            //console.log("Data Channel closed");
-        };
-
-
-        // Answerer side
-        pc.ondatachannel = function (event) {
-            var channel = event.channel;
-            channel.onopen = function (event) {
-                channel.send('ANSWEREROPEN');
-            }
-
-            const receivedBuffers = [];
-            channel.onmessage = async (event) => {
-                console.log("The Answerrer received a message"+event.data);
-                const { data } = event;
-                try {
-                    if (data !== END_OF_FILE_MESSAGE) {
-                        receivedBuffers.push(data);
-                    } else {
-                        const arrayBuffer = receivedBuffers.reduce((acc, arrayBuffer) => {
-                            const tmp = new Uint8Array(acc.byteLength + arrayBuffer.byteLength);
-                            tmp.set(new Uint8Array(acc), 0);
-                            tmp.set(new Uint8Array(arrayBuffer), acc.byteLength);
-                            return tmp;
-                        }, new Uint8Array());
-                        const blob = new Blob([arrayBuffer]);
-                        channel.send("THE FILE IS READYYY")
-                        downloadFile(blob, channel.label);
-                        addDynamicDiv(informationElement,  `recieved file size ${blob.size} byte`)
-
-                        channel.close();
-                    }
-
-                } catch (err) {
-                    console.log('File transfer failed');
-                }
-            };
-        };
-    } catch (e) {
-        console.log('Failed to create PeerConnection, exception: ' + e.message);
-        alert('Cannot create RTCPeerConnection object.');
-        return;
-    }
+function addMessage(message) {
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('message');
+    messageElement.textContent = message;
+    messagesDiv.appendChild(messageElement);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
-//Function to handle Ice candidates generated by the browser
-function handleIceCandidate(event) {
-    console.log('icecandidate event: ', event);
-    if (event.candidate) {
-        sendMessage({
-            type: 'candidate',
-            label: event.candidate.sdpMLineIndex,
-            id: event.candidate.sdpMid,
-            candidate: event.candidate.candidate
-        }, room);
+roomForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const roomName = roomInput.value;
+    socket.emit('join-room', roomName);
+    roomForm.style.display = 'none';
+    fileInput.style.display = 'block';
+    leaveRoomBtn.style.display = 'block';
+    addMessage(`Joined room: ${roomName}`);
+});
+
+fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    sendFile(file);
+    addMessage(`Sending file: ${file.name}`);
+});
+
+leaveRoomBtn.addEventListener('click', () => {
+    const roomName = roomInput.value;
+    socket.disconnect(); // Disconnect from Socket.IO server
+    roomForm.style.display = 'block';
+    fileInput.style.display = 'none';
+    leaveRoomBtn.style.display = 'none';
+    messagesDiv.innerHTML = ''; // Clear messages when leaving room
+    addMessage(`Left room: ${roomName}`);
+});
+function sendFile(file) {
+    const chunkSize = 16384;
+    const reader = new FileReader();
+    let offset = 0;
+
+    reader.onload = e => {
+        const chunk = e.target.result;
+        for (const userId in peers) {
+            if (peers[userId].dataChannel && peers[userId].dataChannel.readyState === 'open') {
+                peers[userId].dataChannel.send(chunk);
+            }
+        }
+        offset += chunkSize;
+        if (offset < file.size) {
+            readSlice(offset);
+        } else {
+            addMessage(`File sent: ${file.name}`);
+        }
+    };
+
+    const readSlice = o => {
+        const slice = file.slice(offset, o + chunkSize);
+        reader.readAsArrayBuffer(slice);
+    };
+
+    readSlice(0);
+}
+
+socket.on('user-connected', userId => {
+    addMessage(`User connected: ${userId}`);
+    createPeerConnection(userId, true);
+});
+
+socket.on('offer', (userId, offer) => {
+    addMessage(`Received offer from: ${userId}`);
+    createPeerConnection(userId, false);
+    peers[userId].peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        .then(() => peers[userId].peerConnection.createAnswer())
+        .then(answer => peers[userId].peerConnection.setLocalDescription(answer))
+        .then(() => socket.emit('answer', userId, peers[userId].peerConnection.localDescription));
+});
+
+socket.on('answer', (userId, answer) => {
+    addMessage(`Received answer from: ${userId}`);
+    peers[userId].peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+});
+
+socket.on('candidate', (userId, candidate) => {
+    addMessage(`Received candidate from: ${userId}`);
+    peers[userId].peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+});
+
+socket.on('user-disconnected', userId => {
+    addMessage(`User disconnected: ${userId}`);
+    if (peers[userId]) {
+        peers[userId].peerConnection.close();
+        delete peers[userId];
+    }
+});
+
+function createPeerConnection(userId, isInitiator) {
+    if (peers[userId]) return; // 이미 연결된 경우 무시
+
+    const peerConnection = new RTCPeerConnection(turnConfig);
+    peers[userId] = { peerConnection };
+
+    if (isInitiator) {
+        const dataChannel = peerConnection.createDataChannel('fileTransfer');
+        peers[userId].dataChannel = dataChannel;
+        setupDataChannel(dataChannel, userId);
     } else {
-        console.log('End of candidates.');
+        peerConnection.ondatachannel = event => {
+            const dataChannel = event.channel;
+            peers[userId].dataChannel = dataChannel;
+            setupDataChannel(dataChannel, userId);
+        };
+    }
+
+    peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+            socket.emit('candidate', userId, event.candidate);
+        }
+    };
+
+    if (isInitiator) {
+        peerConnection.createOffer()
+            .then(offer => peerConnection.setLocalDescription(offer))
+            .then(() => socket.emit('offer', userId, peerConnection.localDescription));
     }
 }
 
-function handleCreateOfferError(event) {
-    console.log('createOffer() error: ', event);
+function setupDataChannel(dataChannel, userId) {
+    dataChannel.binaryType = 'arraybuffer';
+
+    dataChannel.onopen = () => addMessage(`Data channel opened for user: ${userId}`);
+    dataChannel.onclose = () => addMessage(`Data channel closed for user: ${userId}`);
+    dataChannel.onmessage = event => receiveFile(event.data, userId);
 }
 
-//Function to create offer
-function doCall() {
-    console.log('Sending offer to peer');
-    pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
-}
-
-//Function to create answer for the received offer
-function doAnswer() {
-    console.log('Sending answer to peer.');
-    pc.createAnswer().then(
-        setLocalAndSendMessage,
-        onCreateSessionDescriptionError
-    );
-}
-
-//Function to set description of local media
-function setLocalAndSendMessage(sessionDescription) {
-    pc.setLocalDescription(sessionDescription);
-    console.log('setLocalAndSendMessage sending message', sessionDescription);
-    sendMessage(sessionDescription, room);
-}
-
-function onCreateSessionDescriptionError(error) {
-    trace('Failed to create session description: ' + error.toString());
-}
-
-
-function hangup() {
-    console.log('Hanging up.');
-    stop();
-    sendMessage('bye', room);
-}
-
-function handleRemoteHangup() {
-    console.log('Session terminated.');
-    addDynamicDiv(informationElement,`${msToTime()} 소켓 끊어짐`)
-    stop();
-    isInitiator = false;
-}
-
-function stop() {
-    isStarted = false;
-    pc.close();
-    pc = null;
-}
-
-
-var connectbutton = document.getElementById("connectbutton")
-if (connectbutton) {
-    connectbutton.addEventListener("click", () => {
-        if (connectbutton.innerHTML !== "Connected") {
-            socket.emit("create or join", room);
-            sendMessage("gotuser", room);
-            if (isInitiator) {
-                maybeStart();
-            }
-        }
-        connectbutton.innerHTML = "Connected";
-        //connection logic
-    })
-}
-
-let file;
-//DOM elements
-var fileInput = document.getElementById("inputfile");
-fileInput.addEventListener("change", (event) => {
-    file = event.target.files[0];
-})
-var sharefilebutton = document.getElementById("sharefile")
-sharefilebutton.addEventListener("click", () => {
-    shareFile()
-})
-
-const MAXIMUM_MESSAGE_SIZE = 65535;
-const END_OF_FILE_MESSAGE = 'EOF';
-
-const shareFile = async () => {
-    console.log("Share file")
-    if (file) {
-        const arrayBuffer = await file.arrayBuffer();
-        console.log(arrayBuffer)
-        for (let i = 0; i < arrayBuffer.byteLength; i += MAXIMUM_MESSAGE_SIZE) {
-            datachannel.send(arrayBuffer.slice(i, i + MAXIMUM_MESSAGE_SIZE));
-        }
-        addDynamicDiv(informationElement, `send file size ${arrayBuffer.byteLength} byte`)
-        datachannel.send(END_OF_FILE_MESSAGE);
-    }
-};
-
-const downloadFile = (blob, fileName) => {
-    const a = document.createElement('a');
-    const url = window.URL.createObjectURL(blob);
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    a.remove()
-};
-
-
-const addDynamicDiv = (parentElement, text) => {
-    // 새로운 div 엘리먼트를 생성합니다.
-    var newDiv = document.createElement("div");
-    // 텍스트 노드를 추가하여 내용을 설정합니다.
-    var newContent = document.createTextNode(text);
-    // 새로운 div에 텍스트 노드를 추가합니다.
-    newDiv.appendChild(newContent);
-    // container div에 새로운 div를 추가합니다.
-    parentElement.appendChild(newDiv);
-}
-
-const msToTime = () => {
-    let date = new Date(
-        new Date().getTime() - new Date().getTimezoneOffset() * 60000
-    ).toISOString();
-    let splits = date.split(':', 4);
-    // 분:초:msc
-    return splits[1] + ':' + splits[2];
+function receiveFile(data, userId) {
+    const fileBlob = new Blob([data]);
+    const link = document.createElement('a');
+    link.href = window.URL.createObjectURL(fileBlob);
+    link.download = `received_file_from_${userId}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    addMessage(`File received from: ${userId}`);
 }

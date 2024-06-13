@@ -1,32 +1,37 @@
+<!-- views/index.ejs -->
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>WebRTC P2P n:m File Transfer</title>
+    <style>
+        #messages {
+            border: 1px solid #ccc;
+            height: 200px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+        }
+        .message {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
 </head>
-
 <body>
-    <h1>Send files peer to peer</h1>
+<h1>WebRTC P2P n:m File Transfer</h1>
+<form id="roomForm">
+    <label for="roomInput">Room Name:</label>
+    <input type="text" id="roomInput" required>
+    <button type="submit">Join Room</button>
+</form>
 
+<button id="leaveRoomBtn" style="display:none;">Leave Room</button>
+<div id="messages"></div>
+<input type="file" id="fileInput" style="display:none;">
 
-    <button id="connectbutton">Connect with peer</button>
-    <input id="inputfile" type="file">
-    <button id="sharefile">Share file</button>
-    <div id="userId"></div>
-    <div id = information>
+<script src="/socket.io/socket.io.js"></script>
+<script src="js/main.js">
 
-    </div>
-    <!-- Import SocketIO for signalling -->
-    <script src="/socket.io/socket.io.js"></script>
-
-    <!-- Import WebRTC adapter for compatibility with all the browsers  -->
-    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-
-    <script src="js/config.js"></script>
-    <script src="js/main.js"></script>
+</script>
 </body>
-
 </html>
