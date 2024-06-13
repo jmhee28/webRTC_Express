@@ -6,6 +6,7 @@ var http = require('http');
 //For signalling in WebRTC
 var socketIO = require('socket.io');
 
+let connectedUsers = [];
 
 app.use(express.static('public'))
 
@@ -21,6 +22,8 @@ var io = socketIO(server);
 
 io.sockets.on('connection', function(socket) {
 
+	connectedUsers.push(socket.id);
+	socket.emit('init', socket.id);
 	// Convenience function to log server messages on the client.
 	// Arguments is an array like object which contains all the arguments of log(). 
 	// To push all the arguments of log() in array, we have to use apply().
@@ -51,14 +54,12 @@ io.sockets.on('connection', function(socket) {
 		log('Client ID ' + socket.id + ' created room ' + room);
 		socket.emit('created', room, socket.id);
   
-	  } else if (numClients === 1) {
+	  } else if (numClients >= 1) {
 		log('Client ID ' + socket.id + ' joined room ' + room);
 		io.sockets.in(room).emit('join', room);
 		socket.join(room);
 		socket.emit('joined', room, socket.id);
 		io.sockets.in(room).emit('ready');
-	  } else { // max two clients
-		socket.emit('full', room);
 	  }
 	});
   
@@ -75,6 +76,10 @@ io.sockets.on('connection', function(socket) {
   
 	socket.on('bye', function(){
 	  console.log('received bye');
+		connectedUsers = connectedUsers.filter(user => user !== socket.id)
+		console.log(
+			socket.id + ' / ' + msToTime() + ' : 유저 배열에서 끊어진 소켓 아이디를 제거'
+		);
 	});
   
   });

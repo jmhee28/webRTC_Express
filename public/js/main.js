@@ -22,9 +22,17 @@ if (room !== '') {
     // socket.emit('create or join', room);
     // console.log('Attempted to create or  join room', room);
 }
+const infos = document.getElementById('infos');
+const userIdElement = document.getElementById('userId');
+const informationElement = document.getElementById('information');
 
+let userId;
 //Defining socket events
-
+socket.on('init', function (data) {
+    userId = data.id;
+    userIdElement.innerText = `ID: ${data}`;
+    addDynamicDiv(informationElement,`${msToTime()} 소켓연결`)
+})
 //Event - Client has created the room i.e. is the first member of the room
 socket.on('created', function (room) {
     console.log('Created room ' + room);
@@ -119,11 +127,11 @@ function createPeerConnection() {
         // Offerer side
         datachannel = pc.createDataChannel("filetransfer");
         datachannel.onopen =  (event) => {
-            datachannel.send("oferer sent:THIS")
+            datachannel.send("offerer sent:THIS")
         };
 
         datachannel.onmessage =  (event)=> {
-            console.log("The oferrer received a message"+event.data);
+            console.log("The offerrer received a message"+event.data);
         }
         datachannel.onerror = (error) => {
             //console.log("Data Channel Error:", error);
@@ -158,8 +166,11 @@ function createPeerConnection() {
                         const blob = new Blob([arrayBuffer]);
                         channel.send("THE FILE IS READYYY")
                         downloadFile(blob, channel.label);
+                        addDynamicDiv(informationElement,  `recieved file size ${blob.size} byte`)
+
                         channel.close();
                     }
+
                 } catch (err) {
                     console.log('File transfer failed');
                 }
@@ -226,6 +237,7 @@ function hangup() {
 
 function handleRemoteHangup() {
     console.log('Session terminated.');
+    addDynamicDiv(informationElement,`${msToTime()} 소켓 끊어짐`)
     stop();
     isInitiator = false;
 }
@@ -274,6 +286,7 @@ const shareFile = async () => {
         for (let i = 0; i < arrayBuffer.byteLength; i += MAXIMUM_MESSAGE_SIZE) {
             datachannel.send(arrayBuffer.slice(i, i + MAXIMUM_MESSAGE_SIZE));
         }
+        addDynamicDiv(informationElement, `send file size ${arrayBuffer.byteLength} byte`)
         datachannel.send(END_OF_FILE_MESSAGE);
     }
 };
@@ -287,3 +300,24 @@ const downloadFile = (blob, fileName) => {
     window.URL.revokeObjectURL(url);
     a.remove()
 };
+
+
+const addDynamicDiv = (parentElement, text) => {
+    // 새로운 div 엘리먼트를 생성합니다.
+    var newDiv = document.createElement("div");
+    // 텍스트 노드를 추가하여 내용을 설정합니다.
+    var newContent = document.createTextNode(text);
+    // 새로운 div에 텍스트 노드를 추가합니다.
+    newDiv.appendChild(newContent);
+    // container div에 새로운 div를 추가합니다.
+    parentElement.appendChild(newDiv);
+}
+
+const msToTime = () => {
+    let date = new Date(
+        new Date().getTime() - new Date().getTimezoneOffset() * 60000
+    ).toISOString();
+    let splits = date.split(':', 4);
+    // 분:초:msc
+    return splits[1] + ':' + splits[2];
+}
