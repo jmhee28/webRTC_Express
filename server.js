@@ -19,9 +19,10 @@ app.get('/', (req, res) => {
 
 io.on('connection', socket => {
 	console.log('A user connected: ', socket.id);
-
+	socket.emit('init', socket.id);
 	socket.on('join-room', room => {
 		socket.join(room);
+
 		socket.to(room).emit('user-connected', socket.id);
 
 		socket.on('offer', (id, message) => {
@@ -40,6 +41,13 @@ io.on('connection', socket => {
 			socket.to(room).emit('user-disconnected', socket.id);
 		});
 	});
+
+	socket.on('leave-room', room => {
+		socket.leave(room);
+		socket.to(room).emit('user-disconnected', socket.id);
+		console.log(`User ${socket.id} left room ${room}`);
+	});
+
 });
 
 server.listen(port, () => {

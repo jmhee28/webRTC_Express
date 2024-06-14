@@ -18,6 +18,11 @@ const roomForm = document.getElementById('roomForm');
 const roomInput = document.getElementById('roomInput');
 const messagesDiv = document.getElementById('messages');
 const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+const sendFileBtn = document.getElementById('sendFileBtn');
+const roomNameDiv = document.getElementById('roodName');
+const socketIdDiv = document.getElementById('socketId');
+
+let selectedFile = null;
 
 function addMessage(message) {
     const messageElement = document.createElement('div');
@@ -31,39 +36,71 @@ roomForm.addEventListener('submit', event => {
     event.preventDefault();
     const roomName = roomInput.value;
     socket.emit('join-room', roomName);
+
+    roomNameDiv.style.display = 'block';
+    roomNameDiv.innerText = `Room Name: ${roomName}`;
     roomForm.style.display = 'none';
     fileInput.style.display = 'block';
     leaveRoomBtn.style.display = 'block';
+    sendFileBtn.style.display = 'block';
+
     addMessage(`Joined room: ${roomName}`);
 });
 
 fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
-    sendFile(file);
-    addMessage(`Sending file: ${file.name}`);
+    selectedFile = fileInput.files[0];
+    addMessage(`Selected file: ${selectedFile.name}`);
+});
+
+sendFileBtn.addEventListener('click', () => {
+    if (selectedFile) {
+        sendFile(selectedFile);
+        addMessage(`Sending file: ${selectedFile.name}`);
+    } else {
+        alert('No file selected');
+    }
 });
 
 leaveRoomBtn.addEventListener('click', () => {
     const roomName = roomInput.value;
-    socket.disconnect(); // Disconnect from Socket.IO server
+    socket.emit('leave-room', roomName);
     roomForm.style.display = 'block';
     fileInput.style.display = 'none';
     leaveRoomBtn.style.display = 'none';
+    sendFileBtn.style.display = 'none';
+    roomNameDiv.style.display = 'none';
     messagesDiv.innerHTML = ''; // Clear messages when leaving room
     addMessage(`Left room: ${roomName}`);
 });
+
 function sendFile(file) {
-    const chunkSize = 16384;
+    const chunkSize = 32 * 1024; // 64KB
     const reader = new FileReader();
     let offset = 0;
 
+    addMessage(`file will be sent for ${Math.ceil(file.size/chunkSize)} times`)
+    // 파일 메타데이터 전송
+    const metadata = {
+        fileName: file.name,
+        fileSize: file.size
+    };
+    for (const userId in peers) {
+        addMessage(`send ${file.name}'s metadata to ${userId}`)
+        if (peers[userId].dataChannel && peers[userId].dataChannel.readyState === 'open') {
+            peers[userId].dataChannel.send(JSON.stringify({ type: 'metadata', metadata }));
+        }
+    }
+    let i = 0
     reader.onload = e => {
         const chunk = e.target.result;
+
         for (const userId in peers) {
+            addMessage(`send ${i}th ${file.name} to ${userId}`)
             if (peers[userId].dataChannel && peers[userId].dataChannel.readyState === 'open') {
                 peers[userId].dataChannel.send(chunk);
             }
         }
+        i++;
         offset += chunkSize;
         if (offset < file.size) {
             readSlice(offset);
@@ -79,9 +116,12 @@ function sendFile(file) {
 
     readSlice(0);
 }
-
+socket.on('init', userId => {
+    socketIdDiv.innerText = `${userId}`
+})
 socket.on('user-connected', userId => {
     addMessage(`User connected: ${userId}`);
+
     createPeerConnection(userId, true);
 });
 
@@ -146,18 +186,43 @@ function createPeerConnection(userId, isInitiator) {
 function setupDataChannel(dataChannel, userId) {
     dataChannel.binaryType = 'arraybuffer';
 
+    let receivedChunks = [];
+    let receivedMetadata = null;
+    let receivedSize = 0;
+
     dataChannel.onopen = () => addMessage(`Data channel opened for user: ${userId}`);
     dataChannel.onclose = () => addMessage(`Data channel closed for user: ${userId}`);
-    dataChannel.onmessage = event => receiveFile(event.data, userId);
+    dataChannel.onmessage = event => {
+        const message = event.data;
+        if (typeof message === 'string') {
+            const parsedMessage = JSON.parse(message);
+            if (parsedMessage.type === 'metadata') {
+                receivedMetadata = parsedMessage.metadata;
+                addMessage(`Receiving file: ${receivedMetadata.fileName} (${receivedMetadata.fileSize} bytes)`);
+            }
+        } else {
+            const chunk = message;
+            addMessage(`Receiving chunk size: ${chunk.byteLength} bytes`);
+            receivedChunks.push(chunk);
+            receivedSize += chunk.byteLength;
+            if (receivedSize === receivedMetadata.fileSize) {
+                receiveFile(receivedChunks, receivedMetadata);
+                receivedChunks = [];
+                receivedMetadata = null;
+                receivedSize = 0;
+            }
+        }
+    };
 }
 
-function receiveFile(data, userId) {
-    const fileBlob = new Blob([data]);
+function receiveFile(chunks, metadata) {
+    addMessage(`File receive start: ${metadata.fileName}`);
+    const fileBlob = new Blob(chunks);
     const link = document.createElement('a');
     link.href = window.URL.createObjectURL(fileBlob);
-    link.download = `received_file_from_${userId}`;
+    link.download = metadata.fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    addMessage(`File received from: ${userId}`);
+    addMessage(`File received: ${metadata.fileName}`);
 }

@@ -19,6 +19,8 @@
 </head>
 <body>
 <h1>WebRTC P2P n:m File Transfer</h1>
+<div id="socketId">sid</div>
+<div id = "roodName" style="display:none;"></div>
 <form id="roomForm">
     <label for="roomInput">Room Name:</label>
     <input type="text" id="roomInput" required>
@@ -28,7 +30,7 @@
 <button id="leaveRoomBtn" style="display:none;">Leave Room</button>
 <div id="messages"></div>
 <input type="file" id="fileInput" style="display:none;">
-
+<button id="sendFileBtn" style="display:none;">Send File</button>
 <script src="/socket.io/socket.io.js"></script>
 <script src="js/main.js">
 
